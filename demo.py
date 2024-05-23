@@ -38,7 +38,7 @@ from vggsfm.utils.metric import camera_to_rel_deg, calculate_auc, calculate_auc_
 import pycolmap
 
 
-@hydra.main(config_path="cfgs/", config_name="demo")
+@hydra.main(config_path="vggsfm/cfgs/", config_name="test", version_base="1.1")
 def test_fn(cfg: DictConfig):
     OmegaConf.set_struct(cfg, False)
 

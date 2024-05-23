@@ -32,142 +32,15 @@ from vggsfm.utils.utils import (
 from vggsfm.utils.metric import camera_to_rel_deg, calculate_auc, calculate_auc_np
 
 
-@hydra.main(config_path="vggsfm/cfgs/", config_name="test", version_base="1.1")
-def test_fn(cfg: DictConfig):
-    OmegaConf.set_struct(cfg, False)
-    accelerator = Accelerator(even_batches=False, device_placement=False)
-
-    # Print configuration and accelerator state
-    accelerator.print("Model Config:", OmegaConf.to_yaml(cfg), accelerator.state)
-
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
-
-    # Set seed
-    set_seed_and_print(cfg.seed)
-
-    # Model instantiation
-    model = instantiate(cfg.MODEL, _recursive_=False, cfg=cfg)
-
-    device = accelerator.device
-    model = model.to(device)
-
-    # Accelerator setup
-    model = accelerator.prepare(model)
-
-    # Prepare test dataset
-    test_dataset = IMCDataset(IMC_DIR=cfg.IMC_DIR, split="test", img_size=1024, normalize_cameras=False, cfg=cfg)
-
-    if cfg.resume_ckpt:
-        # Reload model
-        checkpoint = torch.load(cfg.resume_ckpt)
-        model.load_state_dict(checkpoint, strict=True)
-        accelerator.print(f"Successfully resumed from {cfg.resume_ckpt}")
-
-    error_dict = {"rError": [], "tError": []}
-
-    sequence_list = test_dataset.sequence_list
-
-    for seq_name in sequence_list:
-        print("*" * 50 + f" Testing on Scene {seq_name} " + "*" * 50)
-
-        # Load the data
-        batch = test_dataset.get_data(sequence_name=seq_name)
-
-        # Send to GPU
-        images = batch["image"].to(device)
-        translation = batch["T"].to(device)
-        rotation = batch["R"].to(device)
-        fl = batch["fl"].to(device)
-        pp = batch["pp"].to(device)
-        crop_params = batch["crop_params"].to(device)
-
-        # Prepare gt cameras
-        gt_cameras = PerspectiveCameras(
-            focal_length=fl.reshape(-1, 2),
-            principal_point=pp.reshape(-1, 2),
-            R=rotation.reshape(-1, 3, 3),
-            T=translation.reshape(-1, 3),
-            device=device,
-        )
-
-        # Unsqueeze to have batch size = 1
-        images = images.unsqueeze(0)
-        crop_params = crop_params.unsqueeze(0)
-
-        batch_size = len(images)
-
-        with torch.no_grad():
-            # Run the model
-            if cfg.use_bf16:
-                with autocast(dtype=torch.bfloat16):
-                    predictions = run_one_scene(
-                        model,
-                        images,
-                        crop_params=crop_params,
-                        query_frame_num=cfg.query_frame_num,
-                        return_in_pt3d=cfg.return_in_pt3d,
-                    )
-            else:
-                predictions = run_one_scene(
-                    model,
-                    images,
-                    crop_params=crop_params,
-                    query_frame_num=cfg.query_frame_num,
-                    return_in_pt3d=cfg.return_in_pt3d,
-                )
-
-        pred_cameras = predictions["pred_cameras"]
-
-        # For more details about error computation,
-        # You can refer to IMC benchmark
-        # https://github.com/ubc-vision/image-matching-benchmark/blob/master/utils/pack_helper.py
-
-        # Compute the error
-        rel_rangle_deg, rel_tangle_deg = camera_to_rel_deg(pred_cameras, gt_cameras, accelerator.device, batch_size)
-
-        print(f"    --  Mean Rot   Error (Deg) for this scene: {rel_rangle_deg.mean():10.2f}")
-        print(f"    --  Mean Trans Error (Deg) for this scene: {rel_tangle_deg.mean():10.2f}")
-
-        error_dict["rError"].extend(rel_rangle_deg.cpu().numpy())
-        error_dict["tError"].extend(rel_tangle_deg.cpu().numpy())
-
-    rError = np.array(error_dict["rError"])
-    tError = np.array(error_dict["tError"])
-
-    # you can choose either calculate_auc/calculate_auc_np, they lead to the same result
-    Auc_30, normalized_histogram = calculate_auc_np(rError, tError, max_threshold=30)
-    Auc_3 = np.mean(np.cumsum(normalized_histogram[:3]))
-    Auc_5 = np.mean(np.cumsum(normalized_histogram[:5]))
-    Auc_10 = np.mean(np.cumsum(normalized_histogram[:10]))
-
-    print(f"Testing Done")
-
-    for _ in range(5):
-        print("-" * 100)
-
-    print("On the IMC dataset")
-    print(f"Auc_3  (%): {Auc_3 * 100}")
-    print(f"Auc_5  (%): {Auc_5 * 100}")
-    print(f"Auc_10 (%): {Auc_10 * 100}")
-    print(f"Auc_30 (%): {Auc_30 * 100}")
-
-    for _ in range(5):
-        print("-" * 100)
-
-    return True
-
-
-def run_one_scene(model, images, crop_params=None, query_frame_num=3, return_in_pt3d=True):
+@torch.no_grad()
+@torch.autocast(device_type='cuda', dtype=torch.bfloat16)
+def run_one_scene(model, images, crop_params=None, query_frame_num=3, return_in_pt3d=False):
     """
     images have been normalized to the range [0, 1] instead of [0, 255]
     """
     batch_num, frame_num, image_dim, height, width = images.shape
     device = images.device
     reshaped_image = images.reshape(batch_num * frame_num, image_dim, height, width)
-
-    predictions = {}
-    extra_dict = {}
 
     camera_predictor = model.camera_predictor
     track_predictor = model.track_predictor
@@ -235,9 +108,11 @@ def run_one_scene(model, images, crop_params=None, query_frame_num=3, return_in_
         pred_track, pred_vis, width, height, tracks_score=pred_score, loopresidual=True
     )
 
-    pose_predictions = camera_predictor(reshaped_image, batch_size=batch_num, preliminary_cameras=preliminary_cameras)
-
-    pred_cameras = pose_predictions["pred_cameras"]
+    pose_predictions = camera_predictor(
+        reshaped_image,
+        batch_size=batch_num,
+        preliminary_cameras=preliminary_cameras
+    )
 
     # Conduct Triangulation and Bundle Adjustment
 
@@ -246,7 +121,7 @@ def run_one_scene(model, images, crop_params=None, query_frame_num=3, return_in_
     # and get the rot and trans by
     # BA_cameras.R, BA_cameras.T
     BA_cameras, _, _, _, _ = triangulator(
-        pred_cameras,
+        pose_predictions["pred_cameras"],
         pred_track,
         pred_vis,
         images,
@@ -254,9 +129,8 @@ def run_one_scene(model, images, crop_params=None, query_frame_num=3, return_in_
         pred_score=pred_score,
         return_in_pt3d=return_in_pt3d,
     )
-    predictions["pred_cameras"] = BA_cameras
 
-    return predictions
+    return BA_cameras
 
 
 def get_query_points(superpoint, sift, query_image, max_query_num=4096):
@@ -310,6 +184,30 @@ def find_query_frame_indexes(reshaped_image, camera_predictor, query_frame_num, 
     return fps_idx
 
 
-if __name__ == "__main__":
-    with torch.no_grad():
-        test_fn()
+def get_model(cfg):
+    OmegaConf.set_struct(cfg, False)
+    accelerator = Accelerator(even_batches=False, device_placement=False)
+
+    # Print configuration and accelerator state
+    accelerator.print("Model Config:", OmegaConf.to_yaml(cfg), accelerator.state)
+
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
+
+    # Set seed
+    set_seed_and_print(cfg.seed)
+
+    # Model instantiation
+    model = instantiate(cfg.MODEL, _recursive_=False, cfg=cfg)
+
+    device = accelerator.device
+    model = model.to(device)
+
+    # Accelerator setup
+    model = accelerator.prepare(model)
+
+    if cfg.resume_ckpt:
+        # Reload model
+        checkpoint = torch.load(cfg.resume_ckpt)
+        model.load_state_dict(checkpoint, strict=True)
+        accelerator.print(f"Successfully resumed from {cfg.resume_ckpt}")

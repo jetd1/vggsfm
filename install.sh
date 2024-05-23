@@ -4,37 +4,16 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-# This Script Assumes Python 3.10, CUDA 12.1
+# This Script Assumes Python 3.10, CUDA 12.1, pytorch 2.3.0
 
 conda deactivate
 
 # Set environment variables
 export ENV_NAME=vggsfm
-export PYTHON_VERSION=3.10
-export PYTORCH_VERSION=2.1.0
-export CUDA_VERSION=12.1
 
 # Create a new conda environment and activate it
-conda create -n $ENV_NAME python=$PYTHON_VERSION
-conda activate $ENV_NAME
-
-# Install PyTorch, torchvision, and PyTorch3D using conda
-conda install pytorch=$PYTORCH_VERSION torchvision pytorch-cuda=$CUDA_VERSION -c pytorch -c nvidia
-conda install -c fvcore -c iopath -c conda-forge fvcore iopath
-conda install pytorch3d -c pytorch3d
-
-# Install pip packages
-pip install hydra-core --upgrade
-pip install omegaconf opencv-python einops visdom 
-pip install accelerate==0.24.0
-
-
-# install gluefactory
-git clone --recursive https://github.com/cvg/glue-factory dependency/glue-factory
-cd dependency/glue-factory/
-python -m pip install -e .  # editable mode
-cd ../../
-
-# Ensure the version of pycolmap is 0.5.0
-pip install pycolmap==0.5.0
-
+conda create -n $ENV_NAME -y python=3.10 && \
+conda activate $ENV_NAME && \
+python -m pip install torch==2.3.0 torchvision==0.18.0 fvcore==0.1.5.post20221221 iopath==0.1.9 hydra-core==1.3.2 omegaconf==2.3.0 opencv-python==4.9.0.80 einops==0.8.0 visdom==0.2.4 accelerate==0.24.0 pycolmap==0.5.0 && \
+python -m pip install -U xformers --index-url https://download.pytorch.org/whl/cu121 && \
+python -m pip install git+https://github.com/facebookresearch/pytorch3d.git@v0.7.6 git+https://github.com/cvg/glue-factory.git@1f56839db2242929960d70f85bfac6c19ef2821c

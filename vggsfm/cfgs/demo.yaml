@@ -1,4 +1,4 @@
-seed: 0
+export PYTHON_VERSION=3.10seed: 0
 debug: False
 use_bf16: False
 query_frame_num: 3
