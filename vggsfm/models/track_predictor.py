@@ -16,6 +16,7 @@ from einops.layers.torch import Rearrange, Reduce
 
 from hydra.utils import instantiate
 from .track_modules.refine_track import refine_track
+from ..utils.utils import run_in_subbatch
 
 
 class TrackerPredictor(nn.Module):
@@ -80,13 +81,12 @@ class TrackerPredictor(nn.Module):
         reshaped_image = images.reshape(batch_num * frame_num, image_dim, height, width)
         if self.coarse_down_ratio > 1:
             # whether or not scale down the input images to save memory
-            fmaps = self.coarse_fnet(
-                F.interpolate(
-                    reshaped_image, scale_factor=1 / self.coarse_down_ratio, mode="bilinear", align_corners=True
-                )
+            inputs = F.interpolate(
+                reshaped_image, scale_factor=1 / self.coarse_down_ratio, mode="bilinear", align_corners=True
             )
         else:
-            fmaps = self.coarse_fnet(reshaped_image)
+            inputs = reshaped_image
+        fmaps = run_in_subbatch(self.coarse_fnet, inputs)
         fmaps = fmaps.reshape(batch_num, frame_num, -1, fmaps.shape[-2], fmaps.shape[-1])
 
         return fmaps

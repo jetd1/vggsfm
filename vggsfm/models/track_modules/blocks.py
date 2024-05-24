@@ -262,7 +262,7 @@ class EfficientUpdateFormer(nn.Module):
 
 
 class CorrBlock:
-    def __init__(self, fmaps, num_levels=4, radius=4, multiple_track_feats=False, padding_mode="zeros"):
+    def __init__(self, fmaps, num_levels=4, radius=4, multiple_track_feats=False, padding_mode="zeros", test=True):
         B, S, C, H, W = fmaps.shape
         self.S, self.C, self.H, self.W = S, C, H, W
         self.padding_mode = padding_mode
@@ -270,13 +270,14 @@ class CorrBlock:
         self.radius = radius
         self.fmaps_pyramid = []
         self.multiple_track_feats = multiple_track_feats
+        self.test_mode = test
 
         self.fmaps_pyramid.append(fmaps)
         for i in range(self.num_levels - 1):
-            fmaps_ = fmaps.reshape(B * S, C, H, W)
-            fmaps_ = F.avg_pool2d(fmaps_, 2, stride=2)
-            _, _, H, W = fmaps_.shape
-            fmaps = fmaps_.reshape(B, S, C, H, W)
+            fmaps = fmaps.reshape(B * S, C, H, W)
+            fmaps = F.avg_pool2d(fmaps, 2, stride=2)
+            _, _, H, W = fmaps.shape
+            fmaps = fmaps.reshape(B, S, C, H, W)
             self.fmaps_pyramid.append(fmaps)
 
     def sample(self, coords):
@@ -325,7 +326,10 @@ class CorrBlock:
                 fmap1 = targets_split[i]
             corrs = torch.matmul(fmap1, fmap2s)
             corrs = corrs.view(B, S, N, H, W)  # B S N (H W) -> B S N H W
-            corrs = corrs / torch.sqrt(torch.tensor(C).float())
+            if self.test_mode:
+                corrs.div_(torch.sqrt(torch.tensor(C).float()))
+            else:
+                corrs = corrs / torch.sqrt(torch.tensor(C).float())
             self.corrs_pyramid.append(corrs)
 
 

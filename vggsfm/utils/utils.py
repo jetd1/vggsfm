@@ -6,6 +6,7 @@
 
 
 import json
+import random
 import warnings
 
 import matplotlib
@@ -88,3 +89,24 @@ def farthest_point_sampling(distance_matrix, num_samples, most_common_frame_inde
             break
 
     return selected_indices
+
+
+def run_in_subbatch(model, batch, subbatch_size=32):
+    outputs = []
+
+    # Get the total number of samples in the batch
+    batch_size = batch.size(0)
+
+    # Process the batch in subbatches
+    for i in range(0, batch_size, subbatch_size):
+        subbatch = batch[i:i+subbatch_size]
+        subbatch_outputs = model(subbatch)
+        outputs.append(subbatch_outputs)
+
+    return torch.cat(outputs, dim=0)
+
+
+def seed_all_random_engines(seed: int) -> None:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)

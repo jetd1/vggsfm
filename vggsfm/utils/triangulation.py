@@ -280,7 +280,7 @@ def refine_pose(
                 answer = pycolmap.pose_refinement(cam_from_world, points2D, points3D, inlier_mask, pycamera, refoptions)
                 cam_from_world = answer["cam_from_world"]
             else:
-                print("This frame only has inliers:", inlier_mask.sum())
+                print(f"frame {ridx} only has #inliers:", inlier_mask.sum())
 
             if second_refine:
                 # refine a second time by filtering out some points with a high reprojection error

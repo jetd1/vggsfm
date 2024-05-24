@@ -1,6 +1,6 @@
-export PYTHON_VERSION=3.10seed: 0
+seed: 0
 debug: False
-use_bf16: False
+use_bf16: True
 query_frame_num: 3
 return_in_pt3d: True
 load_gt: False
@@ -8,7 +8,7 @@ visualize: False
 
 SEQ_DIR: /PATH/TO/YOUR/IMAGE/FOLDER
 resume_ckpt:  /data/home/jianyuan/OpenSource/VGGSfM/tmp/vggsfm102.bin
-
+image_size: 1024
 
 max_ransac_iters: 4096
 

@@ -66,6 +66,9 @@ class SequenceLoader(Dataset):
         for bag_name in bag_names:
             img_filenames = glob.glob(os.path.join(bag_name, "images/*"))
 
+            img_filenames = list(
+                filter(lambda x: x.endswith(".jpg") or x.endswith(".png"), img_filenames))
+
             if self.sort_by_filename:
                 img_filenames = sorted(img_filenames)
 

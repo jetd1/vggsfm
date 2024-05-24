@@ -216,6 +216,29 @@ def get_2d_embedding(xy: torch.Tensor, C: int, cat_coords: bool = True) -> torch
     return pe
 
 
+def grid_sample_subbatch(
+        inputs, coords, align_corners=False,
+        padding_mode='zeros', subbatch_size=1024
+):
+    batch_size = inputs.size(0)
+    output_list = []
+
+    for i in range(0, batch_size, subbatch_size):
+        subbatch_input = inputs[i:i+subbatch_size]
+        subbatch_coords = coords[i:i+subbatch_size]
+
+        subbatch_output = F.grid_sample(
+            subbatch_input,
+            subbatch_coords,
+            align_corners=align_corners,
+            padding_mode=padding_mode
+        )
+
+        output_list.append(subbatch_output)
+
+    return torch.cat(output_list, dim=0)
+
+
 def bilinear_sampler(input, coords, align_corners=True, padding_mode="border"):
     r"""Sample a tensor using bilinear interpolation
 
@@ -274,7 +297,7 @@ def bilinear_sampler(input, coords, align_corners=True, padding_mode="border"):
 
     coords -= 1
 
-    return F.grid_sample(input, coords, align_corners=align_corners, padding_mode=padding_mode)
+    return grid_sample_subbatch(input, coords, align_corners=align_corners, padding_mode=padding_mode)
 
 
 def sample_features4d(input, coords):
