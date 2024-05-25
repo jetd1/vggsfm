@@ -12,7 +12,6 @@ import torch
 from torch.cuda.amp import autocast
 
 import hydra
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 from pytorch3d.structures import Pointclouds
@@ -20,40 +19,20 @@ from pytorch3d.vis.plotly_vis import plot_scene
 from pytorch3d.renderer.cameras import PerspectiveCameras
 
 from vggsfm.datasets.sequence_loader import SequenceLoader
-from vggsfm.utils.utils import seed_all_random_engines
 from vggsfm.utils.metric import camera_to_rel_deg, calculate_auc_np
-from vggsfm.utils2.run_utils import run_one_scene
+from vggsfm.utils2.run_utils import run_one_scene, get_test_model
 
 
 @hydra.main(config_path="vggsfm/cfgs/", config_name="demo", version_base="1.1")
 def test_fn(cfg: DictConfig):
     OmegaConf.set_struct(cfg, False)
 
-    # Print configuration
-    print("Model Config:", OmegaConf.to_yaml(cfg))
-
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
-
-    # Set seed
-    seed_all_random_engines(cfg.seed)
-
-    # Model instantiation
-    model = instantiate(cfg.MODEL, _recursive_=False, cfg=cfg)
-
-    device = "cuda"
-    model = model.to(device)
+    model, device = get_test_model(cfg)
 
     # Prepare test dataset
     test_dataset = SequenceLoader(
         SEQ_DIR=cfg.SEQ_DIR, img_size=cfg.image_size, normalize_cameras=False, load_gt=cfg.load_gt, cfg=cfg
     )
-
-    if cfg.resume_ckpt:
-        # Reload model
-        checkpoint = torch.load(cfg.resume_ckpt)
-        model.load_state_dict(checkpoint, strict=True)
-        print(f"Successfully resumed from {cfg.resume_ckpt}")
 
     error_dict = {"rError": [], "tError": []}
 
@@ -93,27 +72,15 @@ def test_fn(cfg: DictConfig):
 
         batch_size = len(images)
 
-        with torch.no_grad():
-            # Run the model
-            if cfg.use_bf16:
-                with autocast(dtype=torch.bfloat16):
-                    predictions = run_one_scene(
-                        model,
-                        images,
-                        crop_params=crop_params,
-                        query_frame_num=cfg.query_frame_num,
-                        return_in_pt3d=cfg.return_in_pt3d,
-                        max_ransac_iters=cfg.max_ransac_iters,
-                    )
-            else:
-                predictions = run_one_scene(
-                    model,
-                    images,
-                    crop_params=crop_params,
-                    query_frame_num=cfg.query_frame_num,
-                    return_in_pt3d=cfg.return_in_pt3d,
-                    max_ransac_iters=cfg.max_ransac_iters,
-                )
+        with torch.no_grad(), autocast(enabled=cfg.use_bf16, dtype=torch.bfloat16):
+            predictions = run_one_scene(
+                model,
+                images,
+                crop_params=crop_params,
+                query_frame_num=cfg.query_frame_num,
+                return_in_pt3d=cfg.return_in_pt3d,
+                max_ransac_iters=cfg.max_ransac_iters,
+            )
 
         # Export prediction as colmap format
         reconstruction_pycolmap = predictions["reconstruction"]

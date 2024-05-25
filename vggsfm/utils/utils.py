@@ -110,3 +110,38 @@ def seed_all_random_engines(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
+
+
+def segment_tensor_with_overlap_circular(
+        tensor: torch.Tensor,
+        segment_len: int,
+        overlap_len: int
+) -> list:
+    # Get the shape of the input tensor
+    b, v, *rest = tensor.shape
+
+    # Calculate the number of segments
+    num_segments = (v + overlap_len) // (segment_len - overlap_len)
+
+    # Initialize an empty list to store the segmented tensors
+    segmented_tensors = []
+
+    # Iterate over the segments
+    for i in range(num_segments):
+        start_idx = i * (segment_len - overlap_len)
+        end_idx = start_idx + segment_len
+
+        # Check if the end index exceeds the tensor length
+        if end_idx > v:
+            # Perform circular padding for the last segment
+            pad_len = end_idx - v
+            padded_tenor = torch.cat((tensor, tensor[:, :pad_len, ...]), dim=1)
+            segment = padded_tenor[:, start_idx:end_idx, ...]
+        else:
+            # Slice the tensor to get the current segment
+            segment = tensor[:, start_idx:end_idx, ...]
+
+        # Append the segment to the list of segmented tensors
+        segmented_tensors.append(segment)
+
+    return segmented_tensors

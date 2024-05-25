@@ -1,8 +1,12 @@
 import torch
 import torch.nn.functional as F
+from accelerate import Accelerator
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 
 from vggsfm.two_view_geo.estimate_preliminary import estimate_preliminary_cameras
-from vggsfm.utils.utils import farthest_point_sampling, calculate_index_mappings, switch_tensor_order
+from vggsfm.utils.utils import farthest_point_sampling, calculate_index_mappings, switch_tensor_order, \
+    seed_all_random_engines, set_seed_and_print
 
 from gluefactory.models.extractors.superpoint_open import SuperPoint
 from gluefactory.models.extractors.sift import SIFT
@@ -85,7 +89,10 @@ def run_one_scene(
     # i.e., the one has highest (average) cosine similarity to all others
     # Then use farthest_point_sampling to find the next ones
     # The number of query frames is determined by query_frame_num
-    query_frame_indexes = find_query_frame_indexes(reshaped_image, camera_predictor, query_frame_num)
+
+    # query_frame_indexes = find_query_frame_indexes(reshaped_image, camera_predictor, query_frame_num)
+    # query_frame_indexes = [images.size(1) // 3, 2 * images.size(1) // 3]
+    query_frame_indexes = [0, images.size(1) - 1]
 
     # Prepare the methods to extract query points
     superpoint = SuperPoint({"nms_radius": 4, "force_num_keypoints": True}).cuda().eval()
@@ -174,3 +181,26 @@ def run_one_scene(
     predictions["reconstruction"] = reconstruction
 
     return predictions
+
+
+def get_test_model(cfg):
+    accelerator = Accelerator(even_batches=False, device_placement=False)
+
+    accelerator.print("Model Config:", OmegaConf.to_yaml(cfg), accelerator.state)
+
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
+
+    set_seed_and_print(cfg.seed)
+
+    device = accelerator.device
+    model = instantiate(cfg.MODEL, _recursive_=False, cfg=cfg)
+    model = model.to(device)
+    model = accelerator.prepare(model)
+
+    if cfg.resume_ckpt:
+        checkpoint = torch.load(cfg.resume_ckpt)
+        model.load_state_dict(checkpoint, strict=True)
+        accelerator.print(f"Successfully resumed from {cfg.resume_ckpt}")
+
+    return model, device

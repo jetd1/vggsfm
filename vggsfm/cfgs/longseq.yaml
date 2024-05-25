@@ -1,13 +1,20 @@
 seed: 0
 debug: False
 use_bf16: True
-query_frame_num: 3
-imc_scene_eight: False
+query_frame_num: 1
 return_in_pt3d: True
+load_gt: False
+visualize: False
 
-IMC_DIR: /data/home/jianyuan/OpenSource/VGGSfM/tmp/phototourism
-resume_ckpt:  /data/home/jianyuan/OpenSource/VGGSfM/tmp/vggsfm.bin
+segment_len: 9
+overlap_len: 4
+output_path: /PATH/TO/YOUR/OUTPUT/FOLDER
 
+image_dir: /PATH/TO/YOUR/IMAGE/FOLDER
+resume_ckpt:  /data/home/jianyuan/OpenSource/VGGSfM/tmp/vggsfm102.bin
+image_size: 1024
+
+max_ransac_iters: 4096
 
 MODEL:
     _target_: vggsfm.models.VGGSfM

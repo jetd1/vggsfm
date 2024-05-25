@@ -4,56 +4,29 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-
 import numpy as np
-from accelerate import Accelerator
 
 import torch
 from torch.cuda.amp import autocast
 
 import hydra
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 from pytorch3d.renderer.cameras import PerspectiveCameras
 
 from vggsfm.datasets.imc import IMCDataset
-from vggsfm.utils.utils import set_seed_and_print
 from vggsfm.utils.metric import camera_to_rel_deg, calculate_auc_np
-from vggsfm.utils2.run_utils import run_one_scene
+from vggsfm.utils2.run_utils import run_one_scene, get_test_model
 
 
 @hydra.main(config_path="vggsfm/cfgs/", config_name="test", version_base="1.1")
 def test_fn(cfg: DictConfig):
     OmegaConf.set_struct(cfg, False)
-    accelerator = Accelerator(even_batches=False, device_placement=False)
 
-    # Print configuration and accelerator state
-    accelerator.print("Model Config:", OmegaConf.to_yaml(cfg), accelerator.state)
-
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
-
-    # Set seed
-    set_seed_and_print(cfg.seed)
-
-    # Model instantiation
-    model = instantiate(cfg.MODEL, _recursive_=False, cfg=cfg)
-
-    device = accelerator.device
-    model = model.to(device)
-
-    # Accelerator setup
-    model = accelerator.prepare(model)
+    model, device = get_test_model(cfg)
 
     # Prepare test dataset
     test_dataset = IMCDataset(IMC_DIR=cfg.IMC_DIR, split="test", img_size=1024, normalize_cameras=False, cfg=cfg)
-
-    if cfg.resume_ckpt:
-        # Reload model
-        checkpoint = torch.load(cfg.resume_ckpt)
-        model.load_state_dict(checkpoint, strict=True)
-        accelerator.print(f"Successfully resumed from {cfg.resume_ckpt}")
 
     error_dict = {"rError": [], "tError": []}
 
@@ -88,25 +61,14 @@ def test_fn(cfg: DictConfig):
 
         batch_size = len(images)
 
-        with torch.no_grad():
-            # Run the model
-            if cfg.use_bf16:
-                with autocast(dtype=torch.bfloat16):
-                    predictions = run_one_scene(
-                        model,
-                        images,
-                        crop_params=crop_params,
-                        query_frame_num=cfg.query_frame_num,
-                        return_in_pt3d=cfg.return_in_pt3d,
-                    )
-            else:
-                predictions = run_one_scene(
-                    model,
-                    images,
-                    crop_params=crop_params,
-                    query_frame_num=cfg.query_frame_num,
-                    return_in_pt3d=cfg.return_in_pt3d,
-                )
+        with torch.no_grad(), autocast(enabled=cfg.use_bf16, dtype=torch.bfloat16):
+            predictions = run_one_scene(
+                model,
+                images,
+                crop_params=crop_params,
+                query_frame_num=cfg.query_frame_num,
+                return_in_pt3d=cfg.return_in_pt3d,
+            )
 
         pred_cameras = predictions["pred_cameras"]
 
@@ -115,7 +77,7 @@ def test_fn(cfg: DictConfig):
         # https://github.com/ubc-vision/image-matching-benchmark/blob/master/utils/pack_helper.py
 
         # Compute the error
-        rel_rangle_deg, rel_tangle_deg = camera_to_rel_deg(pred_cameras, gt_cameras, accelerator.device, batch_size)
+        rel_rangle_deg, rel_tangle_deg = camera_to_rel_deg(pred_cameras, gt_cameras, device, batch_size)
 
         print(f"    --  Mean Rot   Error (Deg) for this scene: {rel_rangle_deg.mean():10.2f}")
         print(f"    --  Mean Trans Error (Deg) for this scene: {rel_tangle_deg.mean():10.2f}")
